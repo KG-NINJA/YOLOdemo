@@ -1,0 +1,9 @@
+{
+  "name": "yolov8-telemetry-demo",
+  "version": "1.0.0",
+  "description": "YOLOv8 webcam telemetry demo with H/E/S/EV panels",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {}
+}
