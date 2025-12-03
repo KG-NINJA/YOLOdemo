@@ -223,23 +223,41 @@ export class YOLOLoader {
   async #loadFromCDN() {
     console.log('[YOLO Loader] Attempting to load YOLO from CDN...');
     updateModelStatus?.('Fetching YOLO model from CDN...');
-    const cdnUrl = 'https://huggingface.co/ultralytics/YOLOv8/resolve/main/yolov8n.onnx';
-    const response = await fetch(cdnUrl, { cache: 'no-cache' });
-    if (!response.ok) {
-      throw new Error(`CDN error! status: ${response.status}`);
+    const sources = [
+      'https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx',
+      'https://huggingface.co/onnx-community/YOLOv8/resolve/main/yolov8n.onnx',
+      'https://huggingface.co/ultralytics/yolov8n/resolve/main/yolov8n.onnx'
+    ];
+
+    let lastError = null;
+    for (const cdnUrl of sources) {
+      try {
+        const response = await fetch(cdnUrl, { cache: 'no-cache' });
+        if (!response.ok) {
+          throw new Error(`CDN error! status: ${response.status}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        if (!arrayBuffer || arrayBuffer.byteLength < 1024 * 1024) {
+          throw new Error('CDN response is unexpectedly small; aborting.');
+        }
+        console.log('[YOLO Loader] Model loaded from CDN, size:', arrayBuffer.byteLength, 'bytes');
+        const providers = await this.#availableProviders();
+        const start = performance.now();
+        this.session = await ort.InferenceSession.create(new Uint8Array(arrayBuffer), {
+          executionProviders: providers,
+          graphOptimizationLevel: 'all'
+        });
+        const elapsed = Math.round(performance.now() - start);
+        this.activeProvider = this.session.executionProvider || providers[0] || 'wasm';
+        this.#notify(`READY (${this.activeProvider}, ${elapsed}ms)`);
+        console.log('✓ YOLO model loaded successfully from CDN');
+        return this.session;
+      } catch (err) {
+        lastError = err;
+        console.warn(`[YOLO Loader] CDN attempt failed (${cdnUrl}):`, err);
+      }
     }
-    const arrayBuffer = await response.arrayBuffer();
-    console.log('[YOLO Loader] Model loaded from CDN, size:', arrayBuffer.byteLength, 'bytes');
-    const providers = await this.#availableProviders();
-    const start = performance.now();
-    this.session = await ort.InferenceSession.create(new Uint8Array(arrayBuffer), {
-      executionProviders: providers,
-      graphOptimizationLevel: 'all'
-    });
-    const elapsed = Math.round(performance.now() - start);
-    this.activeProvider = this.session.executionProvider || providers[0] || 'wasm';
-    this.#notify(`READY (${this.activeProvider}, ${elapsed}ms)`);
-    console.log('✓ YOLO model loaded successfully from CDN');
-    return this.session;
+
+    throw lastError || new Error('Could not fetch YOLO model from any CDN source');
   }
 }
