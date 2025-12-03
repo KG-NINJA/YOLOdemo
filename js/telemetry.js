@@ -4,7 +4,7 @@ const SAMPLE_H = 120;
 export class TelemetryGenerator {
   constructor(sampleCanvas) {
     this.sampleCanvas = sampleCanvas;
-    this.sampleCtx = sampleCanvas.getContext('2d');
+    this.sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
     this.lastBrightness = null;
   }
 

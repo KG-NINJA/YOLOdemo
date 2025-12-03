@@ -52,9 +52,16 @@ export class YOLOLoader {
 
     try {
       const start = performance.now();
-      this.session = await ort.InferenceSession.create(path, {
-        executionProviders: ['webgl', 'wasm']
-      });
+      try {
+        this.session = await ort.InferenceSession.create(path, {
+          executionProviders: ['webgl', 'wasm']
+        });
+      } catch (primaryErr) {
+        console.warn('WebGL backend unavailable, retrying with WASM', primaryErr);
+        this.session = await ort.InferenceSession.create(path, {
+          executionProviders: ['wasm']
+        });
+      }
       const elapsed = Math.round(performance.now() - start);
       this.ready = true;
       this.#notify(`READY (${elapsed}ms)`);
@@ -89,7 +96,7 @@ export class YOLOLoader {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(source, 0, 0, size, size);
     const { data } = ctx.getImageData(0, 0, size, size);
     const float = new Float32Array(size * size * 3);
@@ -99,40 +106,54 @@ export class YOLOLoader {
       float[p++] = data[i + 2] / 255; // B
     }
     const inputTensor = new ort.Tensor('float32', float, [1, 3, size, size]);
-    return [inputTensor, { ratioX: source.videoWidth ? source.videoWidth / size : source.width / size, ratioY: source.videoHeight ? source.videoHeight / size : source.height / size }];
+    const width = source.videoWidth || source.width;
+    const height = source.videoHeight || source.height;
+    return [inputTensor, { ratioX: width / size, ratioY: height / size, width, height }];
   }
 
   #postprocess(output, meta) {
-    // YOLOv8 ONNX export typically returns [1, 84, N]
+    // YOLOv8 ONNX export typically returns either [1, 84, N] (channel-first)
+    // or [1, N, 84] (channel-last). Handle both to avoid silent failures.
     const data = output.data;
-    const [batch, channels, elements] = output.dims;
-    if (channels < 84) return { boxes: [], scores: [], classes: [] };
+    const dims = output.dims;
+    if (dims.length !== 3) return { boxes: [], scores: [], classes: [] };
+
+    const channelFirst = dims[1] === 84; // 1 x 84 x N
+    const elements = channelFirst ? dims[2] : dims[1];
+    const channels = channelFirst ? dims[1] : dims[2];
+    if (channels < 20) return { boxes: [], scores: [], classes: [] }; // sanity check
+
+    const getVal = (c, i) => channelFirst ? data[c * elements + i] : data[i * channels + c];
 
     const boxes = [];
     const scores = [];
     const classes = [];
 
     for (let i = 0; i < elements; i++) {
-      const x = data[i];
-      const y = data[elements + i];
-      const w = data[2 * elements + i];
-      const h = data[3 * elements + i];
+      const x = getVal(0, i);
+      const y = getVal(1, i);
+      const w = getVal(2, i);
+      const h = getVal(3, i);
       let maxScore = -Infinity;
       let cls = -1;
       for (let c = 4; c < channels; c++) {
-        const score = data[c * elements + i];
+        const score = getVal(c, i);
         if (score > maxScore) {
           maxScore = score;
           cls = c - 4;
         }
       }
-      if (maxScore > 0) {
-        boxes.push([
-          (x - w / 2) * meta.ratioX,
-          (y - h / 2) * meta.ratioY,
-          w * meta.ratioX,
-          h * meta.ratioY
-        ]);
+      if (maxScore > 0.2 && w > 0 && h > 0) {
+        const bx = (x - w / 2) * meta.ratioX;
+        const by = (y - h / 2) * meta.ratioY;
+        const bw = w * meta.ratioX;
+        const bh = h * meta.ratioY;
+        // clamp to frame bounds to avoid NaN/overflow drawing
+        const clampedX = Math.max(0, Math.min(meta.width, bx));
+        const clampedY = Math.max(0, Math.min(meta.height, by));
+        const clampedW = Math.max(0, Math.min(meta.width - clampedX, bw));
+        const clampedH = Math.max(0, Math.min(meta.height - clampedY, bh));
+        boxes.push([clampedX, clampedY, clampedW, clampedH]);
         scores.push(maxScore);
         classes.push(cls);
       }
