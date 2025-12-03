@@ -18,7 +18,7 @@
         <button id="toggle">開始</button>
         <span class="status" id="status">待機中</span>
         <span class="clock">Clock: <span id="clock">--:--:--</span></span>
-        <span class="status">Model: <span id="modelStatus">IDLE</span></span>
+        <span class="status">Model: <span id="modelState">IDLE</span></span>
         <span class="status">Backend: <span id="backend">--</span></span>
       </div>
       <div class="control-group sliders">
@@ -80,7 +80,47 @@ EV ---</pre>
 
   <canvas id="sample" class="sr-only" width="160" height="120"></canvas>
 
+  <div id="modelStatus" style="
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    padding: 10px 20px;
+    background: rgba(0, 0, 0, 0.8);
+    border: 1px solid #0ac8ff;
+    color: #0ac8ff;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 12px;
+    z-index: 1000;
+  ">
+    Loading model... <span id="modelProgress">0%</span>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <script>
+    function updateModelStatus(message) {
+      const statusEl = document.getElementById('modelStatus');
+      if (statusEl) {
+        statusEl.textContent = message;
+      }
+    }
+
+    function modelReady() {
+      const statusEl = document.getElementById('modelStatus');
+      if (statusEl) {
+        statusEl.textContent = '✓ Model Ready';
+        statusEl.style.color = '#00ff88';
+      }
+    }
+
+    function modelError(error) {
+      const statusEl = document.getElementById('modelStatus');
+      if (statusEl) {
+        statusEl.textContent = '✗ Model Error: ' + (error?.message || error);
+        statusEl.style.color = '#ff6b6b';
+      }
+    }
+  </script>
   <script type="module" src="./js/main.js"></script>
 </body>
 </html>

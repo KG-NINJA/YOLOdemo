@@ -18,6 +18,16 @@ let running = false;
 let detectionThreshold = 0.35;
 let telemetryHistory = [];
 
+window.yoloLoader = detector.loader;
+
+detector.onStatus((status) => {
+  ui.updateStatus(status);
+  const backend = detector.getBackend();
+  if (backend) {
+    ui.updateBackend(backend.toUpperCase());
+  }
+});
+
 ui.bind({
   toggle: toggle,
   threshold: (v) => detectionThreshold = v,
@@ -27,15 +37,13 @@ ui.bind({
 });
 
 ui.updateStatus('IDLE');
-ui.updateBackend(navigator.gpu ? 'WebGPU/GL' : 'WASM');
+ui.updateBackend('detecting…');
 ui.updateClock();
 setInterval(() => ui.updateClock(), 1000);
 
 async function reloadModel(variant) {
-  ui.updateStatus('LOADING');
   try {
-    await detector.loadModel(variant);
-    ui.updateStatus('READY');
+    await initializeYOLO(variant);
   } catch (e) {
     ui.updateStatus('ERROR');
   }
@@ -69,22 +77,48 @@ async function start() {
 
 async function loop() {
   if (!running) return;
-  const detections = await detector.detectFrame(video, detectionThreshold);
-  detector.renderFrame(video, detections);
+  try {
+    const detections = await detector.detectFrame(video, detectionThreshold);
+    detector.renderFrame(video, detections);
 
-  const stats = summarizeDetections(detections);
-  const panelData = telemetry.generate(video, stats);
-  ui.updateTelemetry(
-    panelData.panel,
-    formatMetrics(panelData.metrics),
-    panelData.overlays
-  );
-  ui.updatePerformance({ inferenceTime: detector.inferenceTime, fps: detector.fps });
+    const stats = summarizeDetections(detections);
+    const panelData = telemetry.generate(video, stats);
+    ui.updateTelemetry(
+      panelData.panel,
+      formatMetrics(panelData.metrics),
+      panelData.overlays
+    );
+    ui.updatePerformance({ inferenceTime: detector.inferenceTime, fps: detector.fps });
 
-  telemetryHistory.push({ ...panelData.metrics, timestamp: Date.now() });
-  if (telemetryHistory.length > 300) telemetryHistory.shift();
+    telemetryHistory.push({ ...panelData.metrics, timestamp: Date.now() });
+    if (telemetryHistory.length > 300) telemetryHistory.shift();
+  } catch (error) {
+    console.error('Detection failed:', error);
+  }
 
   requestAnimationFrame(loop);
+}
+
+async function initializeYOLO(modelVariant = 'yolov8n') {
+  ui.updateStatus('LOADING');
+  updateModelStatus?.('Loading YOLO model...');
+
+  const loadPromise = detector.loadModel(modelVariant);
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Model load timeout')), 30000)
+  );
+
+  try {
+    await Promise.race([loadPromise, timeoutPromise]);
+    ui.updateStatus('READY');
+    modelReady?.();
+  } catch (error) {
+    console.error('Model initialization failed:', error);
+    modelError?.(error);
+    ui.updateStatus('ERROR');
+    // Optional: place holder for COCO-SSD fallback
+    throw error;
+  }
 }
 
 function summarizeDetections(detections) {

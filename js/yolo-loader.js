@@ -7,7 +7,9 @@ export class YOLOLoader {
     this.session = null;
     this.ready = false;
     this.statusListener = null;
-    this.modelVariant = 'yolov8n-quantized.onnx';
+    this.modelVariant = 'yolov8n';
+    this.activeProvider = 'wasm';
+    this.modelPath = './models/yolov8n.onnx';
   }
 
   /**
@@ -41,29 +43,43 @@ export class YOLOLoader {
    * Load an ONNX model using ort.InferenceSession.
    * @param {string} modelVariant
    */
-  async load(modelVariant = 'yolov8n') {
+  async load(modelVariant = 'yolov8n', modelPath = null) {
     if (!window.ort) {
       throw new Error('onnxruntime-web (ort.min.js) is not available on window.');
     }
     this.modelVariant = modelVariant;
-    const path = this.resolveModelPath(modelVariant);
+    this.modelPath = modelPath || this.resolveModelPath(modelVariant);
     this.ready = false;
     this.#notify(`LOADING ${modelVariant}`);
+    console.log('[YOLO Loader] Attempting to load YOLO from:', this.modelPath);
 
     try {
+      const providers = await this.#availableProviders();
+      const bufferResult = await this.#fetchModelBuffer(this.modelPath);
       const start = performance.now();
-      this.session = await ort.InferenceSession.create(path, {
-        executionProviders: this.#availableProviders()
+      this.session = await ort.InferenceSession.create(bufferResult, {
+        executionProviders: providers,
+        graphOptimizationLevel: 'all'
       });
       const elapsed = Math.round(performance.now() - start);
+      this.activeProvider = this.session.executionProvider || providers[0] || 'wasm';
       this.ready = true;
-      const backend = this.session.executionProvider || this.#availableProviders()[0];
-      this.#notify(`READY (${backend}, ${elapsed}ms)`);
-    } catch (err) {
-      console.error('YOLO load failed', err);
-      this.ready = false;
-      this.#notify('ERROR');
-      throw err;
+      this.#notify(`READY (${this.activeProvider}, ${elapsed}ms)`);
+      console.log('✓ YOLO model loaded successfully', `(provider: ${this.activeProvider}, ${elapsed}ms)`);
+      return this.session;
+    } catch (error) {
+      console.error('Failed to load from local path:', error);
+      updateModelStatus?.('Local load failed, trying CDN...');
+      try {
+        const session = await this.#loadFromCDN();
+        this.ready = true;
+        return session;
+      } catch (cdnErr) {
+        this.ready = false;
+        this.#notify('ERROR');
+        console.error('CDN load failed:', cdnErr);
+        throw new Error('Could not load YOLO model from local or CDN');
+      }
     }
   }
 
@@ -168,18 +184,62 @@ export class YOLOLoader {
     return { boxes, scores, classes };
   }
 
+  getBackend() {
+    return this.activeProvider;
+  }
+
   #notify(status) {
     if (this.statusListener) this.statusListener(status);
   }
 
-  #availableProviders() {
-    const providers = ['wasm'];
-    const webglSupported = typeof ort !== 'undefined' && !!ort.env?.webgl;
-    if (webglSupported) providers.unshift('webgl');
-    return providers;
+  async #availableProviders() {
+    try {
+      if (typeof ort.getAvailableExecutionProviders === 'function') {
+        const providers = await ort.getAvailableExecutionProviders();
+        const preferredOrder = ['webgpu', 'webgl', 'wasm'];
+        const ordered = preferredOrder.filter((p) => providers.includes(p));
+        if (ordered.length) return ordered;
+      }
+    } catch (err) {
+      console.warn('Provider detection failed, falling back to WASM', err);
+    }
+    return ['wasm'];
   }
 
   #sigmoid(x) {
     return 1 / (1 + Math.exp(-x));
+  }
+
+  async #fetchModelBuffer(path) {
+    const response = await fetch(path, { cache: 'no-cache' });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    console.log('[YOLO Loader] Model file loaded, size:', arrayBuffer.byteLength, 'bytes');
+    return new Uint8Array(arrayBuffer);
+  }
+
+  async #loadFromCDN() {
+    console.log('[YOLO Loader] Attempting to load YOLO from CDN...');
+    updateModelStatus?.('Fetching YOLO model from CDN...');
+    const cdnUrl = 'https://huggingface.co/ultralytics/YOLOv8/resolve/main/yolov8n.onnx';
+    const response = await fetch(cdnUrl, { cache: 'no-cache' });
+    if (!response.ok) {
+      throw new Error(`CDN error! status: ${response.status}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    console.log('[YOLO Loader] Model loaded from CDN, size:', arrayBuffer.byteLength, 'bytes');
+    const providers = await this.#availableProviders();
+    const start = performance.now();
+    this.session = await ort.InferenceSession.create(new Uint8Array(arrayBuffer), {
+      executionProviders: providers,
+      graphOptimizationLevel: 'all'
+    });
+    const elapsed = Math.round(performance.now() - start);
+    this.activeProvider = this.session.executionProvider || providers[0] || 'wasm';
+    this.#notify(`READY (${this.activeProvider}, ${elapsed}ms)`);
+    console.log('✓ YOLO model loaded successfully from CDN');
+    return this.session;
   }
 }

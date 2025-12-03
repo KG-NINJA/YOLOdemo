@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "description": "YOLOv8 webcam telemetry demo with H/E/S/EV panels",
   "scripts": {
-    "start": "node server.js"
+    "start": "npx http-server -p 8000 -c-1",
+    "dev": "npx http-server -p 8000 -c-1 --cors"
   },
-  "dependencies": {}
+  "dependencies": {
+    "onnxruntime-web": "^1.16.0"
+  }
 }

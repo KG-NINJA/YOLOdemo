@@ -80,7 +80,7 @@ export class UIController {
       ev: document.getElementById('evCode'),
       performance: document.getElementById('performance'),
       detectionSummary: document.getElementById('detectionSummary'),
-      modelStatus: document.getElementById('modelStatus'),
+      modelStatus: document.getElementById('modelState'),
       backend: document.getElementById('backend'),
       exportFrame: document.getElementById('exportFrame'),
       exportTelemetry: document.getElementById('exportTelemetry'),

@@ -21,6 +21,10 @@ export class YOLODetector {
     this.loader.onStatus(listener);
   }
 
+  getBackend() {
+    return this.loader.getBackend?.();
+  }
+
   async loadModel(variant) {
     await this.loader.load(variant);
   }
