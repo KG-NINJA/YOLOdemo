@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>COCO-SSD × セカイOCRビジョンパネル</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>COCO-SSD × セカイOCRビジョンパネル</h1>
+      <p>物体検知のライブ映像に合わせて、OCRフレンドリーな AI ステータス (H / E / S / EV) と環境メトリクスを同時に表示します。</p>
+    </header>
+
+    <div class="controls">
+      <div class="control-group">
+        <button id="toggle">開始</button>
+        <span class="status" id="status">待機中</span>
+        <span class="clock">Clock: <span id="clock">--:--:--</span></span>
+      </div>
+      <div class="control-group sliders">
+        <label>しきい値 <input id="threshold" type="range" min="0.1" max="1" step="0.01" value="0.5"><span class="mono" id="thVal">50%</span></label>
+        <label>内側ゾーン <input id="zone" type="range" min="0" max="30" step="1" value="10"><span class="mono" id="zoneVal">10</span></label>
+        <label>最小面積(%) <input id="minArea" type="range" min="0" max="20" step="1" value="2"><span class="mono" id="minVal">2</span></label>
+      </div>
+      <div class="control-group">
+        <div class="targets">
+          <span>対象:</span>
+          <label><input type="checkbox" value="person" checked>person</label>
+          <label><input type="checkbox" value="cat" checked>cat</label>
+          <label><input type="checkbox" value="dog" checked>dog</label>
+        </div>
+        <label>音声 <select id="voiceMode"><option value="tts">TTS</option><option value="beep">Beep</option><option value="mute">Mute</option></select></label>
+        <label>クールダウン(s) <input id="cooldown" type="number" min="0" max="30" value="5" class="mono small"></label>
+        <button id="testSpeak" class="ghost">音声テスト</button>
+      </div>
+      <div class="control-group">
+        <label class="wmsg">警告文: <input id="warningText" type="text" value="警告：ここは立入禁止です。直ちに立ち去ってください。"></label>
+      </div>
+    </div>
+
+    <div class="layout">
+      <div class="stage" aria-label="物体検知プレビュー">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        <div class="ocr-panel" aria-live="polite" aria-label="AIステータスパネル">
+          <pre id="panel-text">H ---%
+E ----
+S ----
+EV ---</pre>
+        </div>
+      </div>
+      <div class="info">
+        <div class="card">
+          <h3>AI パネル状態</h3>
+          <div class="value" id="phase">IDLE</div>
+          <p class="desc">H/E/S/EV コードは 300ms ごとに更新。パネルは 150×100px のモノスペース表示。</p>
+        </div>
+        <div class="card">
+          <h3>Heart Rate</h3>
+          <div class="value mono" id="bpm">-- bpm</div>
+          <p class="desc" id="bpmPhrase">ウェブカメラの緑チャネルから心拍を推定し、状態に合わせたセリフを発話します。</p>
+        </div>
+        <div class="metrics">
+          <div class="card">
+            <h3>Ambient Window</h3>
+            <div class="value mono" id="ambient">--.- % / min -- / max --</div>
+            <p class="desc">160×120 サンプルの平均輝度と最小・最大を表示します。</p>
+          </div>
+          <div class="card">
+            <h3>Contrast & Motion</h3>
+            <div class="value mono" id="contrast">std --.- / motion --.-</div>
+            <p class="desc">標準偏差でコントラストを、フレーム差分でモーションスコアを算出します。</p>
+          </div>
+          <div class="card">
+            <h3>Color Bias</h3>
+            <div class="value mono" id="color">R --.- / G --.- / B --.-</div>
+            <p class="desc">チャネル平均の偏りを検知し、環境コード EV に反映します。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <canvas id="sample" class="sr-only" width="160" height="120"></canvas>
+
+  <script src="assets/tf.min.js"></script>
+  <script src="assets/coco-ssd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
