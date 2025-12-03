@@ -8,6 +8,7 @@ export class YOLOLoader {
     this.ready = false;
     this.statusListener = null;
     this.modelVariant = 'yolov8n-quantized.onnx';
+    this.activeProvider = 'wasm';
   }
 
   /**
@@ -46,19 +47,21 @@ export class YOLOLoader {
       throw new Error('onnxruntime-web (ort.min.js) is not available on window.');
     }
     this.modelVariant = modelVariant;
-    const path = this.resolveModelPath(modelVariant);
     this.ready = false;
     this.#notify(`LOADING ${modelVariant}`);
 
     try {
+      const { buffer, source } = await this.#fetchModel(modelVariant);
+      const providers = await this.#availableProviders();
       const start = performance.now();
-      this.session = await ort.InferenceSession.create(path, {
-        executionProviders: this.#availableProviders()
+      this.session = await ort.InferenceSession.create(buffer, {
+        executionProviders: providers
       });
       const elapsed = Math.round(performance.now() - start);
+      this.activeProvider = this.session.executionProvider || providers[0] || 'wasm';
       this.ready = true;
-      const backend = this.session.executionProvider || this.#availableProviders()[0];
-      this.#notify(`READY (${backend}, ${elapsed}ms)`);
+      this.#notify(`READY (${this.activeProvider}, ${elapsed}ms)`);
+      console.info(`YOLO model loaded from ${source} using ${this.activeProvider}`);
     } catch (err) {
       console.error('YOLO load failed', err);
       this.ready = false;
@@ -168,18 +171,64 @@ export class YOLOLoader {
     return { boxes, scores, classes };
   }
 
+  getBackend() {
+    return this.activeProvider;
+  }
+
   #notify(status) {
     if (this.statusListener) this.statusListener(status);
   }
 
-  #availableProviders() {
-    const providers = ['wasm'];
-    const webglSupported = typeof ort !== 'undefined' && !!ort.env?.webgl;
-    if (webglSupported) providers.unshift('webgl');
-    return providers;
+  async #availableProviders() {
+    try {
+      if (typeof ort.getAvailableExecutionProviders === 'function') {
+        const providers = await ort.getAvailableExecutionProviders();
+        const preferredOrder = ['webgpu', 'webgl', 'wasm'];
+        const ordered = preferredOrder.filter((p) => providers.includes(p));
+        if (ordered.length) return ordered;
+      }
+    } catch (err) {
+      console.warn('Provider detection failed, falling back to WASM', err);
+    }
+    return ['wasm'];
   }
 
   #sigmoid(x) {
     return 1 / (1 + Math.exp(-x));
+  }
+
+  async #fetchModel(variant) {
+    const localPath = this.resolveModelPath(variant);
+    const preferred = await this.#tryFetch(localPath);
+    if (preferred) return preferred;
+
+    const fallbackUrl = this.#fallbackUrl(variant);
+    const fallback = await this.#tryFetch(fallbackUrl);
+    if (fallback) return fallback;
+
+    throw new Error(`Failed to download model for variant ${variant}`);
+  }
+
+  async #tryFetch(url) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buffer = await res.arrayBuffer();
+      return { buffer, source: url };
+    } catch (err) {
+      console.warn(`Model fetch failed for ${url}:`, err.message || err);
+      return null;
+    }
+  }
+
+  #fallbackUrl(variant) {
+    const base = 'https://huggingface.co/onnx-community/';
+    const map = {
+      yolov8n: `${base}yolov8n/resolve/main/model.onnx`,
+      'yolov8n-quantized': `${base}yolov8n/resolve/main/model.onnx`,
+      yolov8m: `${base}yolov8m/resolve/main/model.onnx`,
+      yolov8l: `${base}yolov8l/resolve/main/model.onnx`,
+    };
+    return map[variant] || map.yolov8n;
   }
 }

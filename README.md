@@ -14,6 +14,7 @@ COCO-SSD ベースのデモを YOLOv8 (ONNX + onnxruntime-web) に置き換え�
 2. `models/` ディレクトリに使用したい YOLOv8 ONNX ファイルを配置してください。
    - `yolov8n-quantized.onnx` (推奨 CPU)
    - `yolov8n.onnx` / `yolov8m.onnx` / `yolov8l.onnx`
+   - **モデルが無い場合でも、Hugging Face から自動ダウンロードするフォールバックを内蔵しています。**
 3. ローカルサーバを起動してブラウザでアクセスします。
 
 ```bash

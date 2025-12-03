@@ -18,6 +18,14 @@ let running = false;
 let detectionThreshold = 0.35;
 let telemetryHistory = [];
 
+detector.onStatus((status) => {
+  ui.updateStatus(status);
+  const backend = detector.getBackend();
+  if (backend) {
+    ui.updateBackend(backend.toUpperCase());
+  }
+});
+
 ui.bind({
   toggle: toggle,
   threshold: (v) => detectionThreshold = v,
@@ -27,7 +35,7 @@ ui.bind({
 });
 
 ui.updateStatus('IDLE');
-ui.updateBackend(navigator.gpu ? 'WebGPU/GL' : 'WASM');
+ui.updateBackend('detecting…');
 ui.updateClock();
 setInterval(() => ui.updateClock(), 1000);
 
