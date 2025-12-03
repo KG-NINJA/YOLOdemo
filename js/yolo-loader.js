@@ -52,19 +52,13 @@ export class YOLOLoader {
 
     try {
       const start = performance.now();
-      try {
-        this.session = await ort.InferenceSession.create(path, {
-          executionProviders: ['webgl', 'wasm']
-        });
-      } catch (primaryErr) {
-        console.warn('WebGL backend unavailable, retrying with WASM', primaryErr);
-        this.session = await ort.InferenceSession.create(path, {
-          executionProviders: ['wasm']
-        });
-      }
+      this.session = await ort.InferenceSession.create(path, {
+        executionProviders: this.#availableProviders()
+      });
       const elapsed = Math.round(performance.now() - start);
       this.ready = true;
-      this.#notify(`READY (${elapsed}ms)`);
+      const backend = this.session.executionProvider || this.#availableProviders()[0];
+      this.#notify(`READY (${backend}, ${elapsed}ms)`);
     } catch (err) {
       console.error('YOLO load failed', err);
       this.ready = false;
@@ -93,11 +87,23 @@ export class YOLOLoader {
 
   #preprocess(source) {
     const size = 640; // default YOLOv8 input
+    const width = source.videoWidth || source.width;
+    const height = source.videoHeight || source.height;
+
+    // Letterbox resize to preserve aspect ratio (prevents warped detections)
+    const scale = Math.min(size / width, size / height);
+    const newW = Math.round(width * scale);
+    const newH = Math.round(height * scale);
+    const padX = Math.floor((size - newW) / 2);
+    const padY = Math.floor((size - newH) / 2);
+
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(source, 0, 0, size, size);
+    ctx.fillStyle = 'rgb(114,114,114)';
+    ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(source, 0, 0, width, height, padX, padY, newW, newH);
     const { data } = ctx.getImageData(0, 0, size, size);
     const float = new Float32Array(size * size * 3);
     for (let i = 0, p = 0; i < data.length; i += 4) {
@@ -106,9 +112,7 @@ export class YOLOLoader {
       float[p++] = data[i + 2] / 255; // B
     }
     const inputTensor = new ort.Tensor('float32', float, [1, 3, size, size]);
-    const width = source.videoWidth || source.width;
-    const height = source.videoHeight || source.height;
-    return [inputTensor, { ratioX: width / size, ratioY: height / size, width, height }];
+    return [inputTensor, { scale, padX, padY, width, height }];
   }
 
   #postprocess(output, meta) {
@@ -134,20 +138,22 @@ export class YOLOLoader {
       const y = getVal(1, i);
       const w = getVal(2, i);
       const h = getVal(3, i);
+      const obj = this.#sigmoid(getVal(4, i));
       let maxScore = -Infinity;
       let cls = -1;
-      for (let c = 4; c < channels; c++) {
-        const score = getVal(c, i);
-        if (score > maxScore) {
-          maxScore = score;
-          cls = c - 4;
+      for (let c = 5; c < channels; c++) {
+        const clsProb = this.#sigmoid(getVal(c, i)) * obj;
+        if (clsProb > maxScore) {
+          maxScore = clsProb;
+          cls = c - 5;
         }
       }
-      if (maxScore > 0.2 && w > 0 && h > 0) {
-        const bx = (x - w / 2) * meta.ratioX;
-        const by = (y - h / 2) * meta.ratioY;
-        const bw = w * meta.ratioX;
-        const bh = h * meta.ratioY;
+      if (maxScore > 0.25 && w > 0 && h > 0) {
+        // Undo letterbox + scale
+        const bx = (x - w / 2 - meta.padX) / meta.scale;
+        const by = (y - h / 2 - meta.padY) / meta.scale;
+        const bw = w / meta.scale;
+        const bh = h / meta.scale;
         // clamp to frame bounds to avoid NaN/overflow drawing
         const clampedX = Math.max(0, Math.min(meta.width, bx));
         const clampedY = Math.max(0, Math.min(meta.height, by));
@@ -164,5 +170,16 @@ export class YOLOLoader {
 
   #notify(status) {
     if (this.statusListener) this.statusListener(status);
+  }
+
+  #availableProviders() {
+    const providers = ['wasm'];
+    const webglSupported = typeof ort !== 'undefined' && !!ort.env?.webgl;
+    if (webglSupported) providers.unshift('webgl');
+    return providers;
+  }
+
+  #sigmoid(x) {
+    return 1 / (1 + Math.exp(-x));
   }
 }
