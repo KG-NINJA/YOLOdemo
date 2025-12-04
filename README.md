@@ -37,8 +37,8 @@ npm start
 - **EV (Event Code)**: 環境コード + カラーバイアス。平均信頼度が 0.85 以上で +5 の HIGH_CONF を付与。
 
 ## パフォーマンスのヒント
-- GPU (WebGL/WebGPU) がある環境では `yolov8n.onnx` を優先ロードします。
-- CPU のみの場合は `yolov8n-quantized.onnx` を配置すると 80-150ms 程度の推論が期待できます。
+- 本リポジトリは CPU / WASM 専用構成に寄せてあり、実行プロバイダは常に `wasm` を指定します。
+- `npm run fetch:yolo` で `models/yolov8n-quantized.onnx` の取得を試み、入手できない場合は `yolov8n.onnx` を自動でフォールバックします。
 - モデルサイズを抑える場合は Nano (n) を推奨します。
 
 ## ライセンス
