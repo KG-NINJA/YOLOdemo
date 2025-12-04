@@ -9,7 +9,7 @@ export class YOLOLoader {
     this.statusListener = null;
     this.modelVariant = 'yolov8n';
     this.activeProvider = 'wasm';
-    this.modelPath = './models/yolov8n.onnx';
+    this.modelPath = './models/yolov8n-quantized.onnx';
   }
 
   /**
@@ -26,16 +26,13 @@ export class YOLOLoader {
    * @returns {string}
    */
   resolveModelPath(userChoice) {
-    const gpuCapable = () => typeof navigator !== 'undefined' && !!navigator.gpu;
     const preferred = userChoice || this.modelVariant;
     const base = 'models/';
 
-    if (gpuCapable()) {
-      return `${base}yolov8n.onnx`;
-    }
+    // CPU/WASM 専用: 量子化版を優先し、無い場合は通常版にフォールバック
     if (preferred === 'yolov8m') return `${base}yolov8m.onnx`;
     if (preferred === 'yolov8l') return `${base}yolov8l.onnx`;
-    if (preferred === 'yolov8n') return `${base}yolov8n.onnx`;
+    if (preferred === 'yolov8n') return `${base}yolov8n-quantized.onnx`;
     return `${base}yolov8n-quantized.onnx`;
   }
 
@@ -193,16 +190,7 @@ export class YOLOLoader {
   }
 
   async #availableProviders() {
-    try {
-      if (typeof ort.getAvailableExecutionProviders === 'function') {
-        const providers = await ort.getAvailableExecutionProviders();
-        const preferredOrder = ['webgpu', 'webgl', 'wasm'];
-        const ordered = preferredOrder.filter((p) => providers.includes(p));
-        if (ordered.length) return ordered;
-      }
-    } catch (err) {
-      console.warn('Provider detection failed, falling back to WASM', err);
-    }
+    // CPU 専用: 常に WASM プロバイダのみを返す
     return ['wasm'];
   }
 
@@ -224,6 +212,10 @@ export class YOLOLoader {
     console.log('[YOLO Loader] Attempting to load YOLO from CDN...');
     updateModelStatus?.('Fetching YOLO model from CDN...');
     const sources = [
+      'https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n-quantized.onnx',
+      'https://huggingface.co/onnx-community/YOLOv8/resolve/main/yolov8n-quantized.onnx',
+      'https://huggingface.co/ultralytics/yolov8n/resolve/main/yolov8n-quantized.onnx',
+      // Fallback to non-quantized if the CPU-friendly model is unavailable
       'https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx',
       'https://huggingface.co/onnx-community/YOLOv8/resolve/main/yolov8n.onnx',
       'https://huggingface.co/ultralytics/yolov8n/resolve/main/yolov8n.onnx'
