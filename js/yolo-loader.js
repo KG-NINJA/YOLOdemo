@@ -45,38 +45,52 @@ export class YOLOLoader {
       throw new Error('onnxruntime-web (ort.min.js) is not available on window.');
     }
     this.modelVariant = modelVariant;
-    this.modelPath = modelPath || this.resolveModelPath(modelVariant);
     this.ready = false;
-    this.#notify(`LOADING ${modelVariant}`);
-    console.log('[YOLO Loader] Attempting to load YOLO from:', this.modelPath);
 
-    try {
-      const providers = await this.#availableProviders();
-      const bufferResult = await this.#fetchModelBuffer(this.modelPath);
-      const start = performance.now();
-      this.session = await ort.InferenceSession.create(bufferResult, {
-        executionProviders: providers,
-        graphOptimizationLevel: 'all'
-      });
-      const elapsed = Math.round(performance.now() - start);
-      this.activeProvider = this.session.executionProvider || providers[0] || 'wasm';
-      this.ready = true;
-      this.#notify(`READY (${this.activeProvider}, ${elapsed}ms)`);
-      console.log('✓ YOLO model loaded successfully', `(provider: ${this.activeProvider}, ${elapsed}ms)`);
-      return this.session;
-    } catch (error) {
-      console.error('Failed to load from local path:', error);
-      updateModelStatus?.('Local load failed, trying CDN...');
+    const preferredPath = modelPath || this.resolveModelPath(modelVariant);
+    const fallbackLocalPaths = [];
+    if (!modelPath && modelVariant === 'yolov8n') {
+      // If the quantized file is missing, try the standard Nano model before hitting the CDN.
+      fallbackLocalPaths.push('models/yolov8n.onnx');
+    }
+
+    const candidatePaths = [preferredPath, ...fallbackLocalPaths];
+    const providers = await this.#availableProviders();
+    let lastError = null;
+
+    for (const candidate of candidatePaths) {
+      this.modelPath = candidate;
+      this.#notify(`LOADING ${modelVariant}`);
+      console.log('[YOLO Loader] Attempting to load YOLO from:', candidate);
       try {
-        const session = await this.#loadFromCDN();
+        const bufferResult = await this.#fetchModelBuffer(candidate);
+        const start = performance.now();
+        this.session = await ort.InferenceSession.create(bufferResult, {
+          executionProviders: providers,
+          graphOptimizationLevel: 'all'
+        });
+        const elapsed = Math.round(performance.now() - start);
+        this.activeProvider = this.session.executionProvider || providers[0] || 'wasm';
         this.ready = true;
-        return session;
-      } catch (cdnErr) {
-        this.ready = false;
-        this.#notify('ERROR');
-        console.error('CDN load failed:', cdnErr);
-        throw new Error('Could not load YOLO model from local or CDN');
+        this.#notify(`READY (${this.activeProvider}, ${elapsed}ms)`);
+        console.log('✓ YOLO model loaded successfully', `(provider: ${this.activeProvider}, ${elapsed}ms)`);
+        return this.session;
+      } catch (error) {
+        lastError = error;
+        console.error('Failed to load from local path:', error);
       }
+    }
+
+    updateModelStatus?.('Local load failed, trying CDN...');
+    try {
+      const session = await this.#loadFromCDN();
+      this.ready = true;
+      return session;
+    } catch (cdnErr) {
+      this.ready = false;
+      this.#notify('ERROR');
+      console.error('CDN load failed:', cdnErr);
+      throw lastError || new Error('Could not load YOLO model from local or CDN');
     }
   }
 

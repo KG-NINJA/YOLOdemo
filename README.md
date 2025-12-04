@@ -1,6 +1,6 @@
 # YOLOv8 Telemetry Demo
 
-COCO-SSD ベースのデモを YOLOv8 (ONNX + onnxruntime-web) に置き換えたスタンドアロンの Web カメラ検知アプリです。H/E/S/EV テレメトリに推論結果を反映し、GPU があれば自動で WebGL を、CPU のみの場合は WASM/量子化モデルを利用します。
+COCO-SSD ベースのデモを YOLOv8 (ONNX + onnxruntime-web) に置き換えたスタンドアロンの Web カメラ検知アプリです。H/E/S/EV テレメトリに推論結果を反映し、**CPU/WASM 専用構成**として量子化モデルを優先して読み込みます（GPU/WebGL 実行は無効化）。
 
 ## 特長
 - YOLOv8n/m/l/量子化モデルの切り替え
@@ -12,10 +12,10 @@ COCO-SSD ベースのデモを YOLOv8 (ONNX + onnxruntime-web) に置き換え�
 ## セットアップ
 1. 依存ライブラリは CDN から読み込みます (`onnxruntime-web`).
 2. `models/` ディレクトリに使用したい YOLOv8 ONNX ファイルを配置してください。
-   - `yolov8n-quantized.onnx` (推奨 CPU)
+   - `yolov8n-quantized.onnx` (推奨 CPU / デフォルト)
    - `yolov8n.onnx` / `yolov8m.onnx` / `yolov8l.onnx`
-   - `npm run fetch:yolo` で `models/yolov8n.onnx` を自動ダウンロードできます（ネット接続が必要）。
-   - **モデルが無い場合でも、Hugging Face などから自動ダウンロードするフォールバックを内蔵しています。**
+   - `npm run fetch:yolo` で `models/yolov8n-quantized.onnx` の取得を試み、失敗した場合は `models/yolov8n.onnx` を自動ダウンロードします（ネット接続が必要）。
+   - **量子化ファイルが無い場合は、ローカルの `yolov8n.onnx` に自動フォールバックし、それも無い場合のみ Hugging Face などからダウンロードを試みます。**
 3. ローカルサーバを起動してブラウザでアクセスします。
 
 ```bash
