@@ -9,7 +9,7 @@ export class YOLOLoader {
     this.statusListener = null;
     this.modelVariant = 'yolov8n';
     this.activeProvider = 'wasm';
-    this.modelPath = './models/yolov8n.onnx';
+    this.modelPath = './models/yolov8n-quantized.onnx';
   }
 
   /**
@@ -26,16 +26,13 @@ export class YOLOLoader {
    * @returns {string}
    */
   resolveModelPath(userChoice) {
-    const gpuCapable = () => typeof navigator !== 'undefined' && !!navigator.gpu;
     const preferred = userChoice || this.modelVariant;
     const base = 'models/';
 
-    if (gpuCapable()) {
-      return `${base}yolov8n.onnx`;
-    }
+    // CPU/WASM 専用: 量子化版を優先し、無い場合は通常版にフォールバック
     if (preferred === 'yolov8m') return `${base}yolov8m.onnx`;
     if (preferred === 'yolov8l') return `${base}yolov8l.onnx`;
-    if (preferred === 'yolov8n') return `${base}yolov8n.onnx`;
+    if (preferred === 'yolov8n') return `${base}yolov8n-quantized.onnx`;
     return `${base}yolov8n-quantized.onnx`;
   }
 
@@ -48,38 +45,58 @@ export class YOLOLoader {
       throw new Error('onnxruntime-web (ort.min.js) is not available on window.');
     }
     this.modelVariant = modelVariant;
-    this.modelPath = modelPath || this.resolveModelPath(modelVariant);
     this.ready = false;
-    this.#notify(`LOADING ${modelVariant}`);
-    console.log('[YOLO Loader] Attempting to load YOLO from:', this.modelPath);
 
-    try {
-      const providers = await this.#availableProviders();
-      const bufferResult = await this.#fetchModelBuffer(this.modelPath);
-      const start = performance.now();
-      this.session = await ort.InferenceSession.create(bufferResult, {
-        executionProviders: providers,
-        graphOptimizationLevel: 'all'
-      });
-      const elapsed = Math.round(performance.now() - start);
-      this.activeProvider = this.session.executionProvider || providers[0] || 'wasm';
-      this.ready = true;
-      this.#notify(`READY (${this.activeProvider}, ${elapsed}ms)`);
-      console.log('✓ YOLO model loaded successfully', `(provider: ${this.activeProvider}, ${elapsed}ms)`);
-      return this.session;
-    } catch (error) {
-      console.error('Failed to load from local path:', error);
-      updateModelStatus?.('Local load failed, trying CDN...');
+    const preferredPath = modelPath || this.resolveModelPath(modelVariant);
+    const fallbackLocalPaths = [];
+    if (!modelPath && modelVariant === 'yolov8n') {
+      // If the quantized file is missing, try the standard Nano model before hitting the CDN.
+      fallbackLocalPaths.push('models/yolov8n.onnx', './models/yolov8n.onnx', '/models/yolov8n.onnx');
+    }
+
+    // Try common relative/absolute prefixes to avoid 404s when hosted under subpaths
+    const candidatePaths = [
+      preferredPath,
+      `./${preferredPath}`,
+      `/${preferredPath}`,
+      ...fallbackLocalPaths
+    ];
+    const providers = await this.#availableProviders();
+    let lastError = null;
+
+    for (const candidate of candidatePaths) {
+      this.modelPath = candidate;
+      this.#notify(`LOADING ${modelVariant}`);
+      console.log('[YOLO Loader] Attempting to load YOLO from:', candidate);
       try {
-        const session = await this.#loadFromCDN();
+        const bufferResult = await this.#fetchModelBuffer(candidate);
+        const start = performance.now();
+        this.session = await ort.InferenceSession.create(bufferResult, {
+          executionProviders: providers,
+          graphOptimizationLevel: 'all'
+        });
+        const elapsed = Math.round(performance.now() - start);
+        this.activeProvider = this.session.executionProvider || providers[0] || 'wasm';
         this.ready = true;
-        return session;
-      } catch (cdnErr) {
-        this.ready = false;
-        this.#notify('ERROR');
-        console.error('CDN load failed:', cdnErr);
-        throw new Error('Could not load YOLO model from local or CDN');
+        this.#notify(`READY (${this.activeProvider}, ${elapsed}ms)`);
+        console.log('✓ YOLO model loaded successfully', `(provider: ${this.activeProvider}, ${elapsed}ms)`);
+        return this.session;
+      } catch (error) {
+        lastError = error;
+        console.error('Failed to load from local path:', error);
       }
+    }
+
+    updateModelStatus?.('Local load failed, trying CDN...');
+    try {
+      const session = await this.#loadFromCDN();
+      this.ready = true;
+      return session;
+    } catch (cdnErr) {
+      this.ready = false;
+      this.#notify('ERROR');
+      console.error('CDN load failed:', cdnErr);
+      throw lastError || new Error('Could not load YOLO model from local or CDN');
     }
   }
 
@@ -193,16 +210,7 @@ export class YOLOLoader {
   }
 
   async #availableProviders() {
-    try {
-      if (typeof ort.getAvailableExecutionProviders === 'function') {
-        const providers = await ort.getAvailableExecutionProviders();
-        const preferredOrder = ['webgpu', 'webgl', 'wasm'];
-        const ordered = preferredOrder.filter((p) => providers.includes(p));
-        if (ordered.length) return ordered;
-      }
-    } catch (err) {
-      console.warn('Provider detection failed, falling back to WASM', err);
-    }
+    // CPU 専用: 常に WASM プロバイダのみを返す
     return ['wasm'];
   }
 
@@ -224,9 +232,16 @@ export class YOLOLoader {
     console.log('[YOLO Loader] Attempting to load YOLO from CDN...');
     updateModelStatus?.('Fetching YOLO model from CDN...');
     const sources = [
-      'https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx',
-      'https://huggingface.co/onnx-community/YOLOv8/resolve/main/yolov8n.onnx',
-      'https://huggingface.co/ultralytics/yolov8n/resolve/main/yolov8n.onnx'
+      // Quantized first (CPU-friendly)
+      'https://cdn.jsdelivr.net/gh/ultralytics/assets@v0.0.0/releases/download/v8.1.0/yolov8n-quantized.onnx',
+      'https://huggingface.co/onnx-community/YOLOv8/resolve/main/yolov8n-quantized.onnx?download=1',
+      'https://huggingface.co/ultralytics/yolov8n/resolve/main/yolov8n-quantized.onnx?download=1',
+      'https://raw.githubusercontent.com/ultralytics/assets/refs/tags/v8.1.0/releases/download/v8.1.0/yolov8n-quantized.onnx',
+      // Fallback to non-quantized if the CPU-friendly model is unavailable
+      'https://cdn.jsdelivr.net/gh/ultralytics/assets@v0.0.0/releases/download/v8.1.0/yolov8n.onnx',
+      'https://huggingface.co/onnx-community/YOLOv8/resolve/main/yolov8n.onnx?download=1',
+      'https://huggingface.co/ultralytics/yolov8n/resolve/main/yolov8n.onnx?download=1',
+      'https://raw.githubusercontent.com/ultralytics/assets/refs/tags/v8.1.0/releases/download/v8.1.0/yolov8n.onnx'
     ];
 
     let lastError = null;
