@@ -51,10 +51,16 @@ export class YOLOLoader {
     const fallbackLocalPaths = [];
     if (!modelPath && modelVariant === 'yolov8n') {
       // If the quantized file is missing, try the standard Nano model before hitting the CDN.
-      fallbackLocalPaths.push('models/yolov8n.onnx');
+      fallbackLocalPaths.push('models/yolov8n.onnx', './models/yolov8n.onnx', '/models/yolov8n.onnx');
     }
 
-    const candidatePaths = [preferredPath, ...fallbackLocalPaths];
+    // Try common relative/absolute prefixes to avoid 404s when hosted under subpaths
+    const candidatePaths = [
+      preferredPath,
+      `./${preferredPath}`,
+      `/${preferredPath}`,
+      ...fallbackLocalPaths
+    ];
     const providers = await this.#availableProviders();
     let lastError = null;
 
@@ -226,13 +232,16 @@ export class YOLOLoader {
     console.log('[YOLO Loader] Attempting to load YOLO from CDN...');
     updateModelStatus?.('Fetching YOLO model from CDN...');
     const sources = [
-      'https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n-quantized.onnx',
-      'https://huggingface.co/onnx-community/YOLOv8/resolve/main/yolov8n-quantized.onnx',
-      'https://huggingface.co/ultralytics/yolov8n/resolve/main/yolov8n-quantized.onnx',
+      // Quantized first (CPU-friendly)
+      'https://cdn.jsdelivr.net/gh/ultralytics/assets@v0.0.0/releases/download/v8.1.0/yolov8n-quantized.onnx',
+      'https://huggingface.co/onnx-community/YOLOv8/resolve/main/yolov8n-quantized.onnx?download=1',
+      'https://huggingface.co/ultralytics/yolov8n/resolve/main/yolov8n-quantized.onnx?download=1',
+      'https://raw.githubusercontent.com/ultralytics/assets/refs/tags/v8.1.0/releases/download/v8.1.0/yolov8n-quantized.onnx',
       // Fallback to non-quantized if the CPU-friendly model is unavailable
-      'https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx',
-      'https://huggingface.co/onnx-community/YOLOv8/resolve/main/yolov8n.onnx',
-      'https://huggingface.co/ultralytics/yolov8n/resolve/main/yolov8n.onnx'
+      'https://cdn.jsdelivr.net/gh/ultralytics/assets@v0.0.0/releases/download/v8.1.0/yolov8n.onnx',
+      'https://huggingface.co/onnx-community/YOLOv8/resolve/main/yolov8n.onnx?download=1',
+      'https://huggingface.co/ultralytics/yolov8n/resolve/main/yolov8n.onnx?download=1',
+      'https://raw.githubusercontent.com/ultralytics/assets/refs/tags/v8.1.0/releases/download/v8.1.0/yolov8n.onnx'
     ];
 
     let lastError = null;
